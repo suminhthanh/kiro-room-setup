@@ -1,0 +1,154 @@
+[
+  {
+    "model": "auto",
+    "id": "auto",
+    "description": "Models chosen by task for optimal usage and consistent quality",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-opus-5",
+    "id": "claude-opus-5",
+    "description": "Claude Opus 5 model with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-sonnet-5",
+    "id": "claude-sonnet-5",
+    "description": "Claude Sonnet 5 model with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-opus-4.8",
+    "id": "claude-opus-4.8",
+    "description": "Claude Opus 4.8 model with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "gpt-5.6-sol",
+    "id": "gpt-5.6-sol",
+    "description": "Experimental preview of OpenAI GPT 5.6 Sol with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "gpt-5.6-terra",
+    "id": "gpt-5.6-terra",
+    "description": "Experimental preview of OpenAI GPT 5.6 Terra with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "gpt-5.6-luna",
+    "id": "gpt-5.6-luna",
+    "description": "Experimental preview of OpenAI GPT 5.6 Luna with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-opus-4.7",
+    "id": "claude-opus-4.7",
+    "description": "Claude Opus 4.7 model with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-opus-4.6",
+    "id": "claude-opus-4.6",
+    "description": "Claude Opus 4.6 model with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-sonnet-4.6",
+    "id": "claude-sonnet-4.6",
+    "description": "Claude Sonnet 4.6 model with 1M context window",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-opus-4.5",
+    "id": "claude-opus-4.5",
+    "description": "Claude Opus 4.5 model",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-sonnet-4.5",
+    "id": "claude-sonnet-4.5",
+    "description": "Claude Sonnet 4.5 model",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-sonnet-4",
+    "id": "claude-sonnet-4",
+    "description": "Hybrid reasoning and coding for regular use",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "claude-haiku-4.5",
+    "id": "claude-haiku-4.5",
+    "description": "The latest Claude Haiku model",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "deepseek-3.2",
+    "id": "deepseek-3.2",
+    "description": "Experimental preview of DeepSeek V3.2",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "minimax-m2.5",
+    "id": "minimax-m2.5",
+    "description": "MiniMax M2.5 model",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "minimax-m2.1",
+    "id": "minimax-m2.1",
+    "description": "Experimental preview of MiniMax M2.1",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "glm-5",
+    "id": "glm-5",
+    "description": "GLM-5 model",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  },
+  {
+    "model": "qwen3-coder-next",
+    "id": "qwen3-coder-next",
+    "description": "Experimental preview of Qwen3 Coder Next",
+    "thinkingOptionIds": [],
+    "defaultThinkingOptionId": null,
+    "thinkingOptions": "none"
+  }
+]

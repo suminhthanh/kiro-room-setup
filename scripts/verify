@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# Installed-state check. Touches no network and needs no Paseo daemon, so it is
+# usable while the daemon is stopped and inside a container.
+#
+# `./install --verify` runs this and then additionally checks the live provider
+# inventory. Use this one when you only want to know whether the files are right.
+#
+#   scripts/verify            check installed state
+#   scripts/verify --source   check the checkout only, without requiring an install
+
+set -euo pipefail
+
+readonly REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly PROGRAM="kiro-room verify"
+
+: "${HOME:?HOME must be set}"
+
+CONFIG_DIR="${KIRO_ROOM_CONFIG_DIR:-$HOME/.config/kiro-room}"
+BIN_DIR="${KIRO_ROOM_BIN_DIR:-$HOME/.local/bin}"
+RUNTIME_ROOT="${KIRO_ROOM_RUNTIME_ROOT:-$HOME/.kiro-runtime}"
+BASE_HOME="${KIRO_ROOM_BASE_HOME:-$HOME/.kiro}"
+PASEO_CONFIG="${KIRO_ROOM_PASEO_CONFIG:-$HOME/.paseo/config.json}"
+
+readonly ROLES=(supervisor lead peer)
+SOURCE_ONLY=0
+FAILURES=0
+
+[[ ${1:-} == "--source" ]] && SOURCE_ONLY=1
+
+ok()   { printf '  ok    %s\n' "$*"; }
+bad()  { printf '  FAIL  %s\n' "$*" >&2; FAILURES=$((FAILURES + 1)); }
+
+need_file() { [[ -f $1 ]] && ok "$2" || bad "$2 (missing $1)"; }
+need_exec() { [[ -x $1 ]] && ok "$2" || bad "$2 (missing or not executable: $1)"; }
+
+# ----------------------------------------------------------------------
+# Source checks: valid regardless of whether anything is installed.
+# ----------------------------------------------------------------------
+
+printf 'Source\n'
+for f in policy-core.mts kiro-policy.mts room-runtime.mts kiro-room-hook.mjs; do
+  need_file "$REPO_DIR/extensions/$f" "extensions/$f"
+done
+for role in "${ROLES[@]}"; do
+  need_file "$REPO_DIR/home/.config/kiro-room/overlays/$role.json" "overlay $role"
+  need_file "$REPO_DIR/home/.config/kiro-room/prompts/$role.md" "prompt $role"
+done
+need_file "$REPO_DIR/config/model-routing.example.json" "routing example"
+need_file "$REPO_DIR/home/.paseo/config.json.kiro-providers.json" "provider fragment"
+need_exec "$REPO_DIR/home/.local/bin/kiro-room" "launcher source"
+need_exec "$REPO_DIR/home/.local/bin/kiro-room-sync" "sync source"
+
+# The protocol template must still carry its TODO markers in the repo; a shipped
+# template with them already filled in would be a protocol nobody decided.
+if grep -q 'TODO' "$REPO_DIR/home/.config/kiro-room/WORKSPACE_PROTOCOL.md" 2>/dev/null; then
+  ok "workspace protocol template retains its TODO markers"
+else
+  bad "workspace protocol template has no TODO markers left to force a decision"
+fi
+
+if node -e '
+  const { readFileSync } = require("node:fs");
+  const t = JSON.parse(readFileSync(process.argv[1], "utf8"));
+  const f = JSON.parse(readFileSync(process.argv[2], "utf8"));
+  const ids = new Set();
+  for (const c of Object.values(t.classes)) { ids.add(c.primary); ids.add(c.fallback); }
+  const providerIds = new Set();
+  for (const p of Object.values(f.agents.providers)) for (const m of p.models) providerIds.add(m.id);
+  const missing = [...ids].filter((id) => !providerIds.has(id));
+  if (missing.length) {
+    process.stderr.write("routed ids absent from every provider allowlist: " + missing.join(", ") + "\n");
+    process.exit(1);
+  }
+' "$REPO_DIR/config/model-routing.example.json" \
+  "$REPO_DIR/home/.paseo/config.json.kiro-providers.json" 2>/dev/null; then
+  ok "every routed model id appears in a provider allowlist"
+else
+  bad "a routed model id is not offered by any provider allowlist"
+fi
+
+if [[ $SOURCE_ONLY -eq 1 ]]; then
+  printf '\n'
+  [[ $FAILURES -eq 0 ]] && { printf '%s: source OK\n' "$PROGRAM"; exit 0; }
+  printf '%s: %d source check(s) failed\n' "$PROGRAM" "$FAILURES" >&2
+  exit 1
+fi
+
+# ----------------------------------------------------------------------
+# Installed state
+# ----------------------------------------------------------------------
+
+printf '\nInstalled files\n'
+for f in policy-core.mts kiro-policy.mts room-runtime.mts kiro-room-hook.mjs; do
+  need_file "$CONFIG_DIR/extensions/$f" "installed extensions/$f"
+done
+for role in "${ROLES[@]}"; do
+  need_file "$CONFIG_DIR/overlays/$role.json" "installed overlay $role"
+  need_file "$CONFIG_DIR/prompts/$role.md" "installed prompt $role"
+done
+need_exec "$BIN_DIR/kiro-room" "installed launcher"
+need_exec "$BIN_DIR/kiro-room-sync" "installed sync"
+
+printf '\nGenerated runtimes\n'
+for role in "${ROLES[@]}"; do
+  rt="$RUNTIME_ROOT/$role"
+  need_file "$rt/agents/kiro-$role.json" "$role agent config"
+  need_file "$rt/settings/cli.json" "$role settings"
+  need_file "$rt/prompts/$role.md" "$role prompt"
+  need_file "$rt/kiro-room.json" "$role stamp"
+
+  if [[ -d "$rt/kiro-room-state" ]]; then ok "$role state dir"; else bad "$role state dir missing"; fi
+
+  # Isolation: the runtime must not be inside the operator's Kiro home.
+  case "$rt" in
+    "$BASE_HOME"/*) bad "$role runtime is inside $BASE_HOME" ;;
+    *) ok "$role runtime is outside $BASE_HOME" ;;
+  esac
+
+  # Shared links must point back into the operator home, not be copies.
+  for rel in skills steering powers settings/mcp.json; do
+    if [[ -L "$rt/$rel" ]]; then
+      target="$(readlink "$rt/$rel")"
+      case "$target" in
+        "$BASE_HOME"|"$BASE_HOME"/*) ok "$role $rel -> $target" ;;
+        *) bad "$role $rel points outside $BASE_HOME ($target)" ;;
+      esac
+    elif [[ -e "$BASE_HOME/$rel" ]]; then
+      bad "$role $rel is not a symlink although $BASE_HOME/$rel exists"
+    fi
+  done
+
+  # Delegation must be off in the generated settings.
+  if node -e '
+    const s = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    process.exit(s["chat.enableSubagent"] === false ? 0 : 1);
+  ' "$rt/settings/cli.json" 2>/dev/null; then
+    ok "$role native delegation disabled"
+  else
+    bad "$role chat.enableSubagent is not false"
+  fi
+
+  # Hooks must be present and in array form.
+  if node -e '
+    const a = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const events = ["agentSpawn","userPromptSubmit","preToolUse","postToolUse","stop"];
+    for (const e of events) {
+      if (!Array.isArray(a.hooks?.[e]) || a.hooks[e].length === 0) process.exit(1);
+    }
+    if (!a.hooks.preToolUse[0].command.includes("kiro-room-hook.mjs")) process.exit(1);
+  ' "$rt/agents/kiro-$role.json" 2>/dev/null; then
+    ok "$role policy hook wired on all five events"
+  else
+    bad "$role policy hook is missing or not in array form"
+  fi
+done
+
+printf '\nOperator base home\n'
+if [[ -d $BASE_HOME ]]; then
+  ok "$BASE_HOME present"
+  # This repo must not have installed anything into the operator's agent dir.
+  if [[ -e "$BASE_HOME/agents/kiro-supervisor.json" || -e "$BASE_HOME/agents/kiro-lead.json" \
+     || -e "$BASE_HOME/agents/kiro-peer.json" ]]; then
+    bad "role agent configs were written into $BASE_HOME/agents; they belong in the runtimes"
+  else
+    ok "no role agent config leaked into $BASE_HOME/agents"
+  fi
+else
+  bad "$BASE_HOME is missing"
+fi
+
+printf '\nPaseo config\n'
+if [[ -f $PASEO_CONFIG ]]; then
+  if node -e '
+    const c = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const p = c.agents?.providers ?? {};
+    const need = ["kiro-supervisor","kiro-lead","kiro-peer"];
+    const missing = need.filter((id) => !p[id]);
+    if (missing.length) { process.stderr.write(missing.join(", ")); process.exit(1); }
+    for (const id of need) {
+      if (p[id].extends !== "acp") process.exit(1);
+      if (!Array.isArray(p[id].command)) process.exit(1);
+    }
+  ' "$PASEO_CONFIG" 2>/dev/null; then
+    ok "three kiro-* providers present in $PASEO_CONFIG"
+  else
+    bad "kiro-* providers missing or malformed in $PASEO_CONFIG"
+  fi
+
+  if node -e '
+    const c = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const p = c.agents?.providers ?? {};
+    process.exit(p["codex-supervisor"] && p["codex-lead"] && p["codex-peer"] ? 0 : 1);
+  ' "$PASEO_CONFIG" 2>/dev/null; then
+    ok "pre-existing codex-* providers still present"
+  else
+    bad "a codex-* provider went missing from $PASEO_CONFIG"
+  fi
+else
+  bad "$PASEO_CONFIG not found"
+fi
+
+printf '\n'
+if [[ $FAILURES -eq 0 ]]; then
+  printf '%s: OK\n' "$PROGRAM"
+  exit 0
+fi
+printf '%s: %d check(s) failed\n' "$PROGRAM" "$FAILURES" >&2
+exit 1

@@ -1,0 +1,10 @@
+{
+  "chat.defaultAgent": "kiro_default",
+  "chat.defaultModel": "auto",
+  "chat.enableThinking": true,
+  "chat.enableSubagent": true,
+  "chat.enableTodoList": true,
+  "chat.enableCodeIntelligence": true,
+  "chat.enableNotifications": true,
+  "some.operator.key": "keep me"
+}

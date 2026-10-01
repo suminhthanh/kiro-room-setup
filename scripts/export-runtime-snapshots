@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Prints a sanitised summary of each generated runtime, for comparing two hosts
+# or two points in time without copying configuration around.
+#
+# Paths are relativised and no session content, credential or token is read.
+set -euo pipefail
+: "${HOME:?HOME must be set}"
+readonly RUNTIME_ROOT="${KIRO_ROOM_RUNTIME_ROOT:-$HOME/.kiro-runtime}"
+
+[[ -d $RUNTIME_ROOT ]] || { printf 'no runtimes at %s\n' "$RUNTIME_ROOT" >&2; exit 1; }
+
+for role in supervisor lead peer; do
+  rt="$RUNTIME_ROOT/$role"
+  [[ -d $rt ]] || continue
+  printf '## %s\n' "$role"
+  if [[ -f "$rt/kiro-room.json" ]]; then
+    node -e '
+      const s = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      const home = process.env.HOME;
+      const rel = (p) => typeof p === "string" ? p.replace(home, "~") : p;
+      for (const k of ["role","label","model","modelClass","effort","paseoTools"]) {
+        process.stdout.write(`  ${k}: ${JSON.stringify(s[k])}\n`);
+      }
+      process.stdout.write(`  baseHome: ${rel(s.baseHome)}\n`);
+      process.stdout.write(`  hookPath: ${rel(s.hookPath)}\n`);
+    ' "$rt/kiro-room.json"
+  fi
+  if [[ -f "$rt/agents/kiro-$role.json" ]]; then
+    node -e '
+      const a = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write(`  tools: ${a.tools.join(", ")}\n`);
+      process.stdout.write(`  hooks: ${Object.keys(a.hooks).join(", ")}\n`);
+      process.stdout.write(`  includeMcpJson: ${a.includeMcpJson}\n`);
+    ' "$rt/agents/kiro-$role.json"
+  fi
+  printf '  links:\n'
+  for rel in skills steering powers settings/mcp.json; do
+    if [[ -L "$rt/$rel" ]]; then
+      printf '    %s -> %s\n' "$rel" "$(readlink "$rt/$rel" | sed "s|$HOME|~|")"
+    fi
+  done
+  printf '  sessions: %s file(s)\n' "$(ls -1 "$rt/sessions" 2>/dev/null | wc -l | tr -d ' ')"
+  printf '\n'
+done

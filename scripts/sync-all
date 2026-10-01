@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Regenerate all three role runtimes. Lower-level maintenance interface used
+# after editing an overlay, a prompt or the policy; it is not an alternate
+# fresh-install command. Use `./install --apply` for that.
+set -euo pipefail
+: "${HOME:?HOME must be set}"
+readonly BIN_DIR="${KIRO_ROOM_BIN_DIR:-$HOME/.local/bin}"
+exec node "$BIN_DIR/kiro-room-sync" --all "$@"

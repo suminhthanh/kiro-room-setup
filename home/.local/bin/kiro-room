@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# kiro-room <supervisor|lead|peer>
+#
+# The command Paseo spawns for a role seat. Regenerates that role's isolated
+# runtime, then replaces this process with a Kiro ACP agent bound to it.
+#
+# Reasoning effort is pinned here rather than chosen per session because Kiro's
+# ACP surface advertises `thinkingOptions: "none"` for every model, so Paseo has
+# no per-session control to offer. Measured 2026-09-30 against paseo 0.8.0 /
+# daemon 0.9.2; see docs/inventory-20260930.md.
+#
+# The agent engine is left at its default (v2). Under `--agent-engine v3` the
+# generated custom agent is not found and Kiro silently falls back to its
+# built-in default, which would drop every role bound.
+
+set -euo pipefail
+
+readonly PROGRAM="${0##*/}"
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$1" >&2
+  exit "${2:-1}"
+}
+
+usage() {
+  printf 'usage: %s <supervisor|lead|peer>\n' "$PROGRAM"
+}
+
+[[ $# -ge 1 ]] || { usage >&2; exit 1; }
+
+case "$1" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  supervisor | lead | peer)
+    readonly ROLE="$1"
+    ;;
+  *)
+    die "unknown role '$1'; expected supervisor, lead or peer"
+    ;;
+esac
+shift
+
+: "${HOME:?HOME must be set}"
+
+readonly CONFIG_DIR="${KIRO_ROOM_CONFIG_DIR:-$HOME/.config/kiro-room}"
+readonly RUNTIME_ROOT="${KIRO_ROOM_RUNTIME_ROOT:-$HOME/.kiro-runtime}"
+readonly RUNTIME_HOME="$RUNTIME_ROOT/$ROLE"
+readonly SYNC="${KIRO_ROOM_SYNC_BIN:-$HOME/.local/bin/kiro-room-sync}"
+readonly KIRO_BIN="${KIRO_ROOM_KIRO_BIN:-kiro-cli}"
+
+[[ -d $CONFIG_DIR ]] || die "missing $CONFIG_DIR; run ./install --apply first"
+[[ -x $SYNC ]] || die "missing or non-executable $SYNC; run ./install --apply first"
+command -v "$KIRO_BIN" >/dev/null 2>&1 || die "$KIRO_BIN not found on PATH"
+
+# Regenerate before every launch so an overlay or policy edit takes effect on the
+# next session rather than whenever someone remembers to re-sync.
+"$SYNC" "$ROLE" --quiet
+
+readonly STAMP="$RUNTIME_HOME/kiro-room.json"
+[[ -f $STAMP ]] || die "sync did not produce $STAMP"
+
+read_stamp() {
+  node -e '
+    const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const v = s[process.argv[2]];
+    if (v === undefined || v === null || v === "") process.exit(3);
+    process.stdout.write(String(v));
+  ' "$STAMP" "$1"
+}
+
+MODEL="$(read_stamp model)" || die "no model recorded in $STAMP"
+EFFORT="$(read_stamp effort)" || die "no effort recorded in $STAMP"
+readonly MODEL EFFORT
+
+# KIRO_ROOM_ROLE is what switches the policy hook on. A plain `kiro-cli` session
+# never has it set, so the hook exits 0 before loading any policy.
+exec env \
+  KIRO_HOME="$RUNTIME_HOME" \
+  KIRO_ROOM_ROLE="$ROLE" \
+  KIRO_ROOM_CONFIG_DIR="$CONFIG_DIR" \
+  KIRO_ROOM_STATE_DIR="$RUNTIME_HOME/kiro-room-state" \
+  "$KIRO_BIN" acp \
+  --agent "kiro-$ROLE" \
+  --model "$MODEL" \
+  --effort "$EFFORT" \
+  --trust-all-tools \
+  "$@"

@@ -1,0 +1,302 @@
+{
+  "version": 1,
+  "daemon": {
+    "listen": "127.0.0.1:6767",
+    "mcp": {
+      "enabled": true,
+      "injectIntoAgents": true
+    },
+    "browserTools": {
+      "enabled": true
+    },
+    "autoArchiveAfterMerge": false,
+    "enableTerminalAgentHooks": false,
+    "appendSystemPrompt": "",
+    "terminalProfiles": [
+      {
+        "id": "codex",
+        "name": "Codex",
+        "command": "codex",
+        "icon": "codex"
+      },
+      {
+        "id": "claude",
+        "name": "Claude Code",
+        "command": "claude",
+        "icon": "claude"
+      },
+      {
+        "id": "opencode",
+        "name": "OpenCode",
+        "command": "opencode",
+        "icon": "opencode"
+      }
+    ],
+    "agentProfiles": [
+      {
+        "id": "agent_profile_fixture",
+        "name": "Sonnet 5 custom",
+        "provider": "claude",
+        "model": "claude-sonnet-5",
+        "modeId": "bypassPermissions",
+        "thinkingOptionId": "ultracode"
+      }
+    ],
+    "cors": {
+      "allowedOrigins": [
+        "https://app.paseo.sh"
+      ]
+    },
+    "relay": {
+      "enabled": true
+    }
+  },
+  "app": {
+    "baseUrl": "https://app.paseo.sh"
+  },
+  "pluginsEnabled": true,
+  "agents": {
+    "providers": {
+      "codex-supervisor": {
+        "extends": "codex",
+        "label": "Codex Supervisor",
+        "description": "Portfolio governance seat using isolated Codex Room runtime",
+        "command": [
+          "/Users/operator/.local/bin/codex-room",
+          "supervisor"
+        ],
+        "params": {
+          "sandbox_mode": "danger-full-access",
+          "approval_policy": "never"
+        },
+        "models": [
+          {
+            "id": "gpt-5.6-sol",
+            "label": "Sol Medium",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              }
+            ]
+          }
+        ],
+        "additionalModels": [
+          {
+            "id": "gpt-6-sol",
+            "label": "gpt-6-sol"
+          }
+        ],
+        "paseoTools": {
+          "enabled": true
+        }
+      },
+      "codex-peer": {
+        "extends": "codex",
+        "label": "Codex Peer",
+        "description": "Bounded engineering seat without Paseo orchestration tools",
+        "command": [
+          "/Users/operator/.local/bin/codex-room",
+          "peer"
+        ],
+        "params": {
+          "sandbox_mode": "danger-full-access",
+          "approval_policy": "never"
+        },
+        "models": [
+          {
+            "id": "gpt-6-astra",
+            "label": "Astra Low",
+            "isDefault": false,
+            "thinkingOptions": [
+              {
+                "id": "low",
+                "label": "Low",
+                "isDefault": true
+              }
+            ]
+          },
+          {
+            "id": "gpt-5.6-sol",
+            "label": "Sol Medium",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              }
+            ]
+          },
+          {
+            "id": "gpt-5.6-luna",
+            "label": "Luna Max",
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ],
+        "additionalModels": [
+          {
+            "id": "gpt-6-sol",
+            "label": "gpt-6-sol"
+          },
+          {
+            "id": "gpt-6-luna",
+            "label": "gpt-6-luna"
+          }
+        ],
+        "paseoTools": {
+          "enabled": false
+        }
+      },
+      "grok": {
+        "extends": "acp",
+        "label": "Grok",
+        "description": "xAI's Grok Build agentic coding CLI with plan mode and parallel subagents. Requires a SuperGrok or X Premium+ subscription.",
+        "command": [
+          "grok",
+          "agent",
+          "stdio"
+        ],
+        "env": {},
+        "paseoTools": {
+          "enabled": false
+        },
+        "enabled": false
+      },
+      "pi": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "enabled": false
+      },
+      "opencode": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "enabled": false
+      },
+      "copilot": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "enabled": false
+      },
+      "hermes": {
+        "extends": "acp",
+        "label": "Hermes",
+        "description": "Nous Research self-improving AI agent",
+        "command": [
+          "hermes",
+          "acp"
+        ],
+        "env": {},
+        "paseoTools": {
+          "enabled": false
+        },
+        "enabled": false
+      },
+      "codex-lead": {
+        "extends": "codex",
+        "label": "Codex Lead",
+        "description": "Project technical authority using isolated Codex Room runtime",
+        "command": [
+          "/Users/operator/.local/bin/codex-room",
+          "lead"
+        ],
+        "params": {
+          "sandbox_mode": "danger-full-access",
+          "approval_policy": "never"
+        },
+        "models": [
+          {
+            "id": "gpt-6-astra",
+            "label": "Astra Medium",
+            "isDefault": false,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              }
+            ]
+          },
+          {
+            "id": "gpt-5.6-sol",
+            "label": "Sol Medium",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              }
+            ]
+          }
+        ],
+        "paseoTools": {
+          "enabled": true
+        }
+      },
+      "claude": {
+        "paseoTools": {
+          "enabled": false
+        }
+      },
+      "codex": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "enabled": true
+      },
+      "omp": {
+        "paseoTools": {
+          "enabled": false
+        }
+      },
+      "devin": {
+        "extends": "acp",
+        "label": "Devin CLI",
+        "description": "Cognition's Devin for Terminal via Agent Client Protocol",
+        "command": [
+          "devin",
+          "acp"
+        ],
+        "env": {}
+      },
+      "kiro": {
+        "extends": "acp",
+        "label": "Kiro CLI",
+        "description": "Amazon's AI coding agent with native ACP support",
+        "command": [
+          "kiro-cli",
+          "acp"
+        ],
+        "env": {}
+      }
+    },
+    "metadataGeneration": {
+      "providers": [
+        {
+          "provider": "codex",
+          "model": "gpt-5.6-terra"
+        }
+      ]
+    }
+  },
+  "features": {
+    "dictation": {
+      "enabled": false
+    },
+    "voiceMode": {
+      "enabled": false
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "role": "lead",
+  "label": "Kiro Lead",
+  "description": "Project technical authority. Owns framing, dependency order, delegation, verification and explicit candidate acceptance.",
+  "modelClass": "REASONING_HIGH",
+  "effort": "high",
+  "welcomeMessage": "Lead seat. Delegate bounded outcomes to Peers with a brief; do not implement in this seat.",
+  "settings": {
+    "chat.defaultModel": "claude-opus-5",
+    "chat.enableThinking": true,
+    "chat.enableTodoList": true,
+    "chat.enableCodeIntelligence": true
+  }
+}

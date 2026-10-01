@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+/**
+ * kiro-room-sync <role|--all>
+ *
+ * Regenerates one or all isolated role runtimes from the operator's base Kiro
+ * home plus the installed overlays. Reads `~/.kiro`; never writes it.
+ *
+ * Environment overrides, used by the test suite and by anyone running this out
+ * of a checkout rather than from an install:
+ *
+ *   KIRO_ROOM_CONFIG_DIR   default $HOME/.config/kiro-room
+ *   KIRO_ROOM_BASE_HOME    default $HOME/.kiro
+ *   KIRO_ROOM_RUNTIME_ROOT default $HOME/.kiro-runtime
+ *   KIRO_ROOM_ROUTING      default $HOME/.kiro-room/model-routing.local.json,
+ *                          falling back to the shipped example
+ */
+
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const HOME = process.env.HOME ?? '';
+const configDir = process.env.KIRO_ROOM_CONFIG_DIR ?? join(HOME, '.config', 'kiro-room');
+const baseHome = process.env.KIRO_ROOM_BASE_HOME ?? join(HOME, '.kiro');
+const runtimeRoot = process.env.KIRO_ROOM_RUNTIME_ROOT ?? join(HOME, '.kiro-runtime');
+
+const extDir = join(configDir, 'extensions');
+const runtimeModule = join(extDir, 'room-runtime.mts');
+if (!existsSync(runtimeModule)) {
+  process.stderr.write(
+    `kiro-room-sync: cannot find ${runtimeModule}.\n` +
+      'Set KIRO_ROOM_CONFIG_DIR to the directory holding extensions/, overlays/ and prompts/.\n',
+  );
+  process.exit(1);
+}
+
+const { ROLES } = await import(pathToFileURL(join(extDir, 'policy-core.mts')).href);
+const { syncRole } = await import(pathToFileURL(runtimeModule).href);
+
+function loadRouting() {
+  const candidates = [
+    process.env.KIRO_ROOM_ROUTING,
+    join(HOME, '.kiro-room', 'model-routing.local.json'),
+    join(configDir, 'model-routing.example.json'),
+  ].filter(Boolean);
+  for (const path of candidates) {
+    if (existsSync(path)) return { path, table: JSON.parse(readFileSync(path, 'utf8')) };
+  }
+  throw new Error(
+    `no model routing table found; looked at:\n  ${candidates.join('\n  ')}`,
+  );
+}
+
+const args = process.argv.slice(2);
+if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+  process.stdout.write(
+    'usage: kiro-room-sync <supervisor|lead|peer|--all> [--quiet]\n',
+  );
+  process.exit(args.length === 0 ? 1 : 0);
+}
+
+const quiet = args.includes('--quiet');
+const positional = args.filter((a) => !a.startsWith('-'));
+const wantAll = args.includes('--all');
+const roles = wantAll ? ROLES : positional;
+
+if (!wantAll && roles.length !== 1) {
+  process.stderr.write('kiro-room-sync: pass exactly one role, or --all\n');
+  process.exit(1);
+}
+for (const role of roles) {
+  if (!ROLES.includes(role)) {
+    process.stderr.write(
+      `kiro-room-sync: unknown role ${JSON.stringify(role)}; expected one of ${ROLES.join(', ')}\n`,
+    );
+    process.exit(1);
+  }
+}
+
+const { path: routingPath, table } = loadRouting();
+const hookPath = join(extDir, 'kiro-room-hook.mjs');
+
+let failed = false;
+for (const role of roles) {
+  const cls = table.roleDefaults?.[role];
+  const entry = table.classes?.[cls];
+  if (!entry?.primary) {
+    process.stderr.write(
+      `kiro-room-sync: routing table ${routingPath} has no primary model for ` +
+        `role ${role} (class ${JSON.stringify(cls)})\n`,
+    );
+    failed = true;
+    continue;
+  }
+  try {
+    const result = syncRole({
+      role,
+      baseHome,
+      runtimeHome: join(runtimeRoot, role),
+      configDir,
+      model: entry.primary,
+      // The routing class is the more specific statement about the work this
+      // seat does, so its effort wins over the overlay's. The overlay value
+      // remains the fallback for a table that predates the field.
+      effort: entry.effort,
+      hookPath,
+    });
+    if (!quiet) {
+      process.stdout.write(`${role}: ${result.runtimeHome} (model ${entry.primary})\n`);
+      for (const p of result.written) process.stdout.write(`  wrote  ${p}\n`);
+      for (const l of result.linked) process.stdout.write(`  link   ${l}\n`);
+      for (const s of result.skippedLinks) process.stdout.write(`  skip   ${s}\n`);
+      if (result.written.length === 0) process.stdout.write('  (already up to date)\n');
+    }
+  } catch (error) {
+    process.stderr.write(`kiro-room-sync: ${role}: ${error.message}\n`);
+    failed = true;
+  }
+}
+
+process.exit(failed ? 1 : 0);

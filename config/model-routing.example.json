@@ -1,0 +1,66 @@
+{
+  "$schema": "kiro-room/model-routing-v1",
+  "note": [
+    "Copy this to ~/.kiro-room/model-routing.local.json and confirm every id against",
+    "the live catalog with `kiro-cli chat --list-models --format json`.",
+    "Every id below was verified present on kiro-cli 2.26.0 on 2026-09-30;",
+    "multipliers are the live values, not the ones in the public docs.",
+    "Fallback must be a different family than primary. `preflight` enforces this",
+    "for REVIEW_HIGH, where an independent reviewer is the whole point."
+  ],
+  "classes": {
+    "MONITOR_ECONOMY": {
+      "primary": "gpt-5.6-luna",
+      "primaryMultiplier": 1.1,
+      "fallback": "claude-haiku-4.5",
+      "fallbackMultiplier": 0.4,
+      "effort": "low",
+      "reason": "A monitoring sweep runs on a schedule and must not cost what a review costs."
+    },
+    "FAST_READ": {
+      "primary": "claude-haiku-4.5",
+      "primaryMultiplier": 0.4,
+      "fallback": "gpt-5.6-luna",
+      "fallbackMultiplier": 1.1,
+      "effort": "low",
+      "reason": "Lookup, grep and summarise need speed and cheapness, not depth."
+    },
+    "CODING_MEDIUM": {
+      "primary": "claude-sonnet-5",
+      "primaryMultiplier": 1.3,
+      "fallback": "gpt-5.6-terra",
+      "fallbackMultiplier": 2.2,
+      "effort": "medium",
+      "reason": "Day-to-day implementation inside a bounded scope."
+    },
+    "REASONING_HIGH": {
+      "primary": "claude-opus-5",
+      "primaryMultiplier": 2.2,
+      "fallback": "gpt-5.6-sol",
+      "fallbackMultiplier": 4.4,
+      "effort": "high",
+      "reason": "Multi-file refactors, migrations and root-cause work where self-verification pays."
+    },
+    "REVIEW_HIGH": {
+      "primary": "gpt-5.6-sol",
+      "primaryMultiplier": 4.4,
+      "fallback": "claude-opus-5",
+      "fallbackMultiplier": 2.2,
+      "effort": "high",
+      "reason": "Reviewer runs on a different family than the implementer on purpose: a model is a poor auditor of its own failure modes."
+    }
+  },
+  "roleDefaults": {
+    "supervisor": "MONITOR_ECONOMY",
+    "lead": "REASONING_HIGH",
+    "peer": "CODING_MEDIUM"
+  },
+  "fallbackPolicy": {
+    "triggers": [
+      "the primary id is absent from the live provider inventory",
+      "the provider returns a quota, region or capacity error",
+      "the same tool loop fails repeatedly on the primary"
+    ],
+    "obligation": "Every switch is recorded in the brief that dispatched the work, with the trigger that caused it. An unrecorded switch makes cost attribution and review provenance unreadable."
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "_comment": [
+    "Merged into ~/.paseo/config.json by `./install --apply`. Only these three keys",
+    "under agents.providers are added; nothing else in the operator's config is touched.",
+    "@@HOME@@ is rendered to $HOME at install time.",
+    "",
+    "`models` REPLACES Paseo's runtime-discovered catalog rather than extending it.",
+    "That is deliberate: the seat should offer the routing table's ids and nothing",
+    "else, so a wrong pick is impossible from the UI. After any provider update,",
+    "inspect `paseo provider models kiro-peer --json` before widening this list.",
+    "Never use `additionalModels` here - it appends to the catalog instead of",
+    "replacing it, which reintroduces every model including the expensive ones.",
+    "",
+    "Every id below was verified present on kiro-cli 2.26.0 on 2026-09-30.",
+    "",
+    "Reasoning effort is NOT listed as a thinking option because Kiro's ACP surface",
+    "reports `thinkingOptions: \"none\"` for every model. Effort is pinned on the",
+    "kiro-room command line from the role overlay instead."
+  ],
+  "agents": {
+    "providers": {
+      "kiro-supervisor": {
+        "extends": "acp",
+        "label": "Kiro Supervisor",
+        "description": "Portfolio governance seat using an isolated Kiro Room runtime. Observe and route; no writes.",
+        "command": ["@@HOME@@/.local/bin/kiro-room", "supervisor"],
+        "params": {
+          "supportsMcpServers": true
+        },
+        "models": [
+          { "id": "gpt-5.6-luna", "label": "Luna (monitor 1.1x)", "isDefault": true },
+          { "id": "claude-haiku-4.5", "label": "Haiku 4.5 (fallback 0.4x)" }
+        ],
+        "paseoTools": { "enabled": true },
+        "order": 20
+      },
+      "kiro-lead": {
+        "extends": "acp",
+        "label": "Kiro Lead",
+        "description": "Project technical authority using an isolated Kiro Room runtime. Delegates, verifies, accepts.",
+        "command": ["@@HOME@@/.local/bin/kiro-room", "lead"],
+        "params": {
+          "supportsMcpServers": true
+        },
+        "models": [
+          { "id": "claude-opus-5", "label": "Opus 5 (reasoning 2.2x)", "isDefault": true },
+          { "id": "gpt-5.6-sol", "label": "Sol (fallback 4.4x)" },
+          { "id": "claude-sonnet-5", "label": "Sonnet 5 (coding 1.3x)" }
+        ],
+        "paseoTools": { "enabled": true },
+        "order": 21
+      },
+      "kiro-peer": {
+        "extends": "acp",
+        "label": "Kiro Peer",
+        "description": "Bounded engineering seat without Paseo orchestration tools. Authority comes from the current brief.",
+        "command": ["@@HOME@@/.local/bin/kiro-room", "peer"],
+        "params": {
+          "supportsMcpServers": true
+        },
+        "models": [
+          { "id": "claude-sonnet-5", "label": "Sonnet 5 (coding 1.3x)", "isDefault": true },
+          { "id": "gpt-5.6-terra", "label": "Terra (fallback 2.2x)" },
+          { "id": "claude-opus-5", "label": "Opus 5 (reasoning 2.2x)" },
+          { "id": "gpt-5.6-sol", "label": "Sol (review 4.4x)" },
+          { "id": "claude-haiku-4.5", "label": "Haiku 4.5 (fast read 0.4x)" },
+          { "id": "gpt-5.6-luna", "label": "Luna (monitor 1.1x)" }
+        ],
+        "paseoTools": { "enabled": false },
+        "order": 22
+      }
+    }
+  }
+}

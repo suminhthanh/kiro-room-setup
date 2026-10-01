@@ -1,0 +1,14 @@
+{
+  "role": "peer",
+  "label": "Kiro Peer",
+  "description": "Bounded engineering seat. Owns one outcome and returns an immutable candidate or a concrete block signal.",
+  "modelClass": "CODING_MEDIUM",
+  "effort": "medium",
+  "welcomeMessage": "Peer seat. Authority comes from the brief in this turn; a message without one is read-only.",
+  "settings": {
+    "chat.defaultModel": "claude-sonnet-5",
+    "chat.enableThinking": true,
+    "chat.enableTodoList": true,
+    "chat.enableCodeIntelligence": true
+  }
+}

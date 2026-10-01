@@ -1,0 +1,13 @@
+{
+  "role": "supervisor",
+  "label": "Kiro Supervisor",
+  "description": "Portfolio governance seat. Observes, reports and performs one gated Lead recovery. Never writes product code.",
+  "modelClass": "MONITOR_ECONOMY",
+  "effort": "low",
+  "welcomeMessage": "Supervisor seat. Monitoring and routing only — technical framing belongs to the Lead.",
+  "settings": {
+    "chat.defaultModel": "gpt-5.6-luna",
+    "chat.enableThinking": true,
+    "chat.enableTodoList": true
+  }
+}

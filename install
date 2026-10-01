@@ -1,0 +1,442 @@
+#!/usr/bin/env bash
+# kiro-room-setup installer.
+#
+#   ./install            plan only. Reads, prints, checks prerequisites. Writes nothing.
+#   ./install --apply    transactional install with backup and rollback.
+#   ./install --verify   check installed state plus the live Paseo provider inventory.
+#
+# It never writes to ~/.kiro. The operator owns that directory; this repo reads
+# it as a base and generates elsewhere.
+#
+# --apply does NOT reload the Paseo daemon. That is printed as the next step
+# instead, because reloading is a control-plane action with its own timing
+# requirement: Paseo rewrites the whole provider set back into config.json on
+# daemon start and on every desktop reconnect, so an edit the running daemon
+# never loaded is silently clobbered. Reload immediately after applying.
+
+set -euo pipefail
+
+readonly REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROGRAM="${0##*/}"
+
+: "${HOME:?HOME must be set}"
+
+MODE="plan"
+QUIET=0
+
+# Destinations. Overridable so the test suite can drive a fake HOME.
+CONFIG_DIR="${KIRO_ROOM_CONFIG_DIR:-$HOME/.config/kiro-room}"
+BIN_DIR="${KIRO_ROOM_BIN_DIR:-$HOME/.local/bin}"
+RUNTIME_ROOT="${KIRO_ROOM_RUNTIME_ROOT:-$HOME/.kiro-runtime}"
+BASE_HOME="${KIRO_ROOM_BASE_HOME:-$HOME/.kiro}"
+PASEO_CONFIG="${KIRO_ROOM_PASEO_CONFIG:-$HOME/.paseo/config.json}"
+ROUTING_DIR="${KIRO_ROOM_ROUTING_DIR:-$HOME/.kiro-room}"
+BACKUP_ROOT="${KIRO_ROOM_BACKUP_ROOT:-$HOME/.kiro-room-backups}"
+FAIL_AFTER="${KIRO_ROOM_FAIL_AFTER:-}"   # test hook: inject a failure at a named step
+
+readonly ROLES=(supervisor lead peer)
+readonly EXTENSIONS=(policy-core.mts kiro-policy.mts room-runtime.mts kiro-room-hook.mjs)
+readonly LAUNCHERS=(kiro-room kiro-room-sync)
+
+BACKUP_DIR=""
+APPLIED=0
+
+log()  { [[ $QUIET -eq 1 ]] || printf '%s\n' "$*"; }
+step() { [[ $QUIET -eq 1 ]] || printf '\n== %s\n' "$*"; }
+warn() { printf '%s: %s\n' "$PROGRAM" "$*" >&2; }
+die()  { warn "$1"; exit "${2:-1}"; }
+
+usage() {
+  cat <<'EOF'
+usage: ./install [--apply | --verify] [--quiet]
+
+  (no flag)   plan only: prerequisites and the exact changes that would be made
+  --apply     install transactionally, with backup and rollback on failure
+  --verify    check installed state and the live Paseo provider inventory
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apply)  MODE="apply" ;;
+    --verify) MODE="verify" ;;
+    --quiet)  QUIET=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "unknown argument '$1'" ;;
+  esac
+  shift
+done
+
+# ----------------------------------------------------------------------
+# Prerequisites
+# ----------------------------------------------------------------------
+
+# Hard failures block the install. Warnings do not, because they describe
+# conditions that matter when a seat *runs* and can be fixed afterwards without
+# reinstalling: logging in, and having $BIN_DIR on PATH.
+check_prereqs() {
+  local failures=0
+
+  local node_version
+  if ! command -v node >/dev/null 2>&1; then
+    warn "node not found; Node 22.18 or newer is required (the policy is loaded as .mts)"
+    failures=$((failures + 1))
+  else
+    node_version="$(node --version | sed 's/^v//')"
+    if ! node -e '
+      const [maj, min] = process.versions.node.split(".").map(Number);
+      process.exit(maj > 22 || (maj === 22 && min >= 18) ? 0 : 1);
+    '; then
+      warn "node $node_version is too old; 22.18+ is required for .mts type stripping"
+      failures=$((failures + 1))
+    else
+      log "  node            $node_version"
+    fi
+  fi
+
+  local tool
+  for tool in bash git; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      log "  $(printf '%-15s' "$tool")present"
+    else
+      warn "$tool not found"
+      failures=$((failures + 1))
+    fi
+  done
+
+  if command -v kiro-cli >/dev/null 2>&1; then
+    log "  kiro-cli        $(kiro-cli --version 2>/dev/null | head -1)"
+    # Login state is checked with the operator's own HOME, not a relocated one:
+    # kiro-cli resolves its helper binary under $HOME/.local/bin, so probing it
+    # with HOME pointed elsewhere reports a false negative and can trigger a
+    # device-authorisation flow. Skipped when HOME has been redirected.
+    if [[ "${KIRO_ROOM_SKIP_AUTH_CHECK:-0}" == "1" ]]; then
+      log "  kiro-cli auth   not checked (KIRO_ROOM_SKIP_AUTH_CHECK=1)"
+    elif kiro-cli whoami >/dev/null 2>&1; then
+      log "  kiro-cli auth   logged in"
+    else
+      warn "kiro-cli is not logged in; run 'kiro-cli login' before starting a seat"
+    fi
+  else
+    warn "kiro-cli not found on PATH"
+    failures=$((failures + 1))
+  fi
+
+  if command -v paseo >/dev/null 2>&1; then
+    log "  paseo           $(paseo --version 2>/dev/null | head -1)"
+  else
+    warn "paseo not found on PATH"
+    failures=$((failures + 1))
+  fi
+
+  if [[ -d $BASE_HOME ]]; then
+    log "  base home       $BASE_HOME (read-only to this installer)"
+  else
+    warn "$BASE_HOME does not exist; install and run kiro-cli once first"
+    failures=$((failures + 1))
+  fi
+
+  if [[ -f $PASEO_CONFIG ]]; then
+    log "  paseo config    $PASEO_CONFIG"
+  else
+    warn "$PASEO_CONFIG not found; start Paseo once before installing"
+    failures=$((failures + 1))
+  fi
+
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) log "  PATH            includes $BIN_DIR" ;;
+    *) warn "$BIN_DIR is not on PATH; add it so 'kiro-room' is reachable" ;;
+  esac
+
+  return "$failures"
+}
+
+# ----------------------------------------------------------------------
+# Plan
+# ----------------------------------------------------------------------
+
+print_plan() {
+  step "Prerequisites"
+  local prereq_failures=0
+  check_prereqs || prereq_failures=$?
+
+  step "Files this installer would write"
+  local f
+  for f in "${EXTENSIONS[@]}"; do log "  $CONFIG_DIR/extensions/$f"; done
+  for f in "${ROLES[@]}"; do
+    log "  $CONFIG_DIR/overlays/$f.json"
+    log "  $CONFIG_DIR/prompts/$f.md"
+  done
+  log "  $CONFIG_DIR/WORKSPACE_PROTOCOL.md"
+  log "  $CONFIG_DIR/model-routing.example.json"
+  for f in "${LAUNCHERS[@]}"; do log "  $BIN_DIR/$f"; done
+  log "  $ROUTING_DIR/model-routing.local.json   (only if absent)"
+  for f in "${ROLES[@]}"; do log "  $RUNTIME_ROOT/$f/   (generated runtime)"; done
+
+  step "Paseo providers this installer would add"
+  log "  agents.providers.kiro-supervisor"
+  log "  agents.providers.kiro-lead"
+  log "  agents.providers.kiro-peer"
+  log ""
+  log "  Nothing else in $PASEO_CONFIG is touched. Your existing codex-supervisor,"
+  log "  codex-lead, codex-peer, claude, codex and kiro providers, the daemon block"
+  log "  and the features block are all left byte-identical, and the installer"
+  log "  refuses to write if that is not true."
+
+  step "What this installer never touches"
+  log "  $BASE_HOME  (your Kiro home: auth, settings, skills, steering, powers)"
+  log "  It is read as a base and linked into each runtime, never written."
+
+  step "Next steps"
+  log "  ./install --apply"
+  log "  paseo daemon reload      # immediately, not later"
+  log "  ./install --verify"
+
+  if [[ $prereq_failures -gt 0 ]]; then
+    printf '\n'
+    die "$prereq_failures prerequisite check(s) failed; nothing was written" 1
+  fi
+  log ""
+  log "Plan only. Nothing was written."
+}
+
+# ----------------------------------------------------------------------
+# Apply
+# ----------------------------------------------------------------------
+
+backup_if_present() {
+  local src="$1" rel="$2"
+  [[ -e $src || -L $src ]] || return 0
+  local dst="$BACKUP_DIR/$rel"
+  mkdir -p "$(dirname "$dst")"
+  cp -R "$src" "$dst"
+}
+
+install_file() {
+  local src="$1" dst="$2" mode="$3" rel="$4"
+  backup_if_present "$dst" "$rel"
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst"
+  chmod "$mode" "$dst"
+}
+
+rollback() {
+  local code=$?
+  trap - EXIT INT TERM
+  if [[ $APPLIED -eq 0 || -z $BACKUP_DIR ]]; then exit "$code"; fi
+  warn "apply failed; rolling back from $BACKUP_DIR"
+
+  # 1. Restore every file that existed before and was replaced or removed.
+  local rel dst
+  while IFS= read -r rel; do
+    dst="$HOME/$rel"
+    mkdir -p "$(dirname "$dst")"
+    rm -rf "$dst"
+    cp -R "$BACKUP_DIR/$rel" "$dst"
+  done < <(cd "$BACKUP_DIR" && find . -type f \
+             -not -name '.created' -not -name '.created-roots' \
+             -not -path './paseo/*' | sed 's|^\./||')
+
+  # 2. Remove everything this run created. Roots recorded in .created-roots are
+  #    removed wholesale, because they did not exist at all before the apply.
+  while IFS= read -r dst; do
+    [[ -n $dst ]] && rm -rf "$dst"
+  done < <(cat "$BACKUP_DIR/.created-roots" 2>/dev/null || true)
+
+  while IFS= read -r dst; do
+    [[ -z $dst ]] && continue
+    rel="${dst#"$HOME"/}"
+    if [[ ! -e "$BACKUP_DIR/$rel" ]]; then rm -rf "$dst"; fi
+  done < <(cat "$BACKUP_DIR/.created" 2>/dev/null || true)
+
+  # 3. Prune directories left empty by the removals, stopping at HOME so an
+  #    operator directory that merely became empty is not deleted.
+  local dir
+  while IFS= read -r dir; do
+    [[ -z $dir ]] && continue
+    while [[ $dir != "$HOME" && $dir != / && -d $dir ]]; do
+      rmdir "$dir" 2>/dev/null || break
+      dir="$(dirname "$dir")"
+    done
+  done < <(cat "$BACKUP_DIR/.created" 2>/dev/null | while IFS= read -r p; do dirname "$p"; done || true)
+
+  warn "rollback complete; the backup is preserved at $BACKUP_DIR"
+  exit "$code"
+}
+
+record_created() {
+  printf '%s\n' "$1" >> "$BACKUP_DIR/.created"
+}
+
+# Records a directory tree that did not exist before this apply, so rollback can
+# remove the whole thing rather than trying to reconstruct which files were new.
+record_created_root() {
+  [[ -e $1 ]] && return 0
+  printf '%s\n' "$1" >> "$BACKUP_DIR/.created-roots"
+}
+
+maybe_fail() {
+  [[ "$FAIL_AFTER" == "$1" ]] || return 0
+  die "injected failure after step '$1' (KIRO_ROOM_FAIL_AFTER)" 9
+}
+
+do_apply() {
+  step "Prerequisites"
+  check_prereqs || die "prerequisite checks failed; nothing was written"
+
+  local stamp
+  stamp="$(date -u '+%Y%m%dT%H%M%SZ')"
+  BACKUP_DIR="$BACKUP_ROOT/$stamp-$$-$(date +%s)"
+  mkdir -p "$BACKUP_DIR"
+  chmod 700 "$BACKUP_ROOT" "$BACKUP_DIR"
+  APPLIED=1
+  trap rollback EXIT INT TERM
+
+  step "Backup"
+  log "  $BACKUP_DIR"
+
+  # Anything that does not exist yet is recorded before the first write, so a
+  # rollback can remove the whole tree instead of guessing which files were new.
+  record_created_root "$CONFIG_DIR"
+  record_created_root "$RUNTIME_ROOT"
+  record_created_root "$ROUTING_DIR"
+
+  step "Installing managed files"
+  local f
+  for f in "${EXTENSIONS[@]}"; do
+    [[ -e "$CONFIG_DIR/extensions/$f" ]] || record_created "$CONFIG_DIR/extensions/$f"
+    install_file "$REPO_DIR/extensions/$f" "$CONFIG_DIR/extensions/$f" 0644 \
+      ".config/kiro-room/extensions/$f"
+    log "  $CONFIG_DIR/extensions/$f"
+  done
+
+  for f in "${ROLES[@]}"; do
+    [[ -e "$CONFIG_DIR/overlays/$f.json" ]] || record_created "$CONFIG_DIR/overlays/$f.json"
+    install_file "$REPO_DIR/home/.config/kiro-room/overlays/$f.json" \
+      "$CONFIG_DIR/overlays/$f.json" 0644 ".config/kiro-room/overlays/$f.json"
+    [[ -e "$CONFIG_DIR/prompts/$f.md" ]] || record_created "$CONFIG_DIR/prompts/$f.md"
+    install_file "$REPO_DIR/home/.config/kiro-room/prompts/$f.md" \
+      "$CONFIG_DIR/prompts/$f.md" 0644 ".config/kiro-room/prompts/$f.md"
+    log "  $CONFIG_DIR/overlays/$f.json"
+    log "  $CONFIG_DIR/prompts/$f.md"
+  done
+
+  [[ -e "$CONFIG_DIR/WORKSPACE_PROTOCOL.md" ]] || record_created "$CONFIG_DIR/WORKSPACE_PROTOCOL.md"
+  install_file "$REPO_DIR/home/.config/kiro-room/WORKSPACE_PROTOCOL.md" \
+    "$CONFIG_DIR/WORKSPACE_PROTOCOL.md" 0644 ".config/kiro-room/WORKSPACE_PROTOCOL.md"
+
+  [[ -e "$CONFIG_DIR/model-routing.example.json" ]] || record_created "$CONFIG_DIR/model-routing.example.json"
+  install_file "$REPO_DIR/config/model-routing.example.json" \
+    "$CONFIG_DIR/model-routing.example.json" 0644 ".config/kiro-room/model-routing.example.json"
+
+  for f in "${LAUNCHERS[@]}"; do
+    [[ -e "$BIN_DIR/$f" ]] || record_created "$BIN_DIR/$f"
+    install_file "$REPO_DIR/home/.local/bin/$f" "$BIN_DIR/$f" 0755 ".local/bin/$f"
+    log "  $BIN_DIR/$f"
+  done
+  maybe_fail files
+
+  step "Operator routing table"
+  mkdir -p "$ROUTING_DIR"
+  if [[ -f "$ROUTING_DIR/model-routing.local.json" ]]; then
+    log "  $ROUTING_DIR/model-routing.local.json already exists, left as-is"
+  else
+    record_created "$ROUTING_DIR/model-routing.local.json"
+    cp "$REPO_DIR/config/model-routing.example.json" "$ROUTING_DIR/model-routing.local.json"
+    chmod 0644 "$ROUTING_DIR/model-routing.local.json"
+    log "  $ROUTING_DIR/model-routing.local.json seeded from the example"
+  fi
+  maybe_fail routing
+
+  step "Generating role runtimes"
+  for f in "${ROLES[@]}"; do
+    [[ -e "$RUNTIME_ROOT/$f" ]] || record_created "$RUNTIME_ROOT/$f"
+  done
+  KIRO_ROOM_CONFIG_DIR="$CONFIG_DIR" \
+  KIRO_ROOM_BASE_HOME="$BASE_HOME" \
+  KIRO_ROOM_RUNTIME_ROOT="$RUNTIME_ROOT" \
+  KIRO_ROOM_ROUTING="$ROUTING_DIR/model-routing.local.json" \
+    node "$BIN_DIR/kiro-room-sync" --all ${QUIET:+--quiet} || die "runtime generation failed"
+  maybe_fail runtimes
+
+  step "Merging Paseo providers"
+  backup_if_present "$PASEO_CONFIG" ".paseo/config.json"
+  node "$REPO_DIR/scripts/merge-paseo-providers.mjs" \
+    --fragment "$REPO_DIR/home/.paseo/config.json.kiro-providers.json" \
+    --target "$PASEO_CONFIG" \
+    --home "$HOME" \
+    --backup-dir "$BACKUP_DIR/paseo" || die "provider merge failed"
+  maybe_fail providers
+
+  step "Verifying installed state"
+  "$REPO_DIR/scripts/verify" || die "post-install verification failed"
+  maybe_fail verify
+
+  trap - EXIT INT TERM
+  APPLIED=0
+
+  step "Done"
+  log "  Backup: $BACKUP_DIR"
+  log ""
+  log "  Run these two commands now, in this order:"
+  log ""
+  log "    paseo daemon reload"
+  log "    ./install --verify"
+  log ""
+  log "  Reload immediately. Paseo rewrites the provider set back into config.json"
+  log "  on daemon start and on every desktop reconnect, so an edit the running"
+  log "  daemon never loaded is silently clobbered."
+}
+
+# ----------------------------------------------------------------------
+# Verify
+# ----------------------------------------------------------------------
+
+do_verify() {
+  step "Installed state"
+  "$REPO_DIR/scripts/verify" || die "installed-state verification failed"
+
+  step "Routing table against the live catalog"
+  KIRO_ROOM_ROUTING="$ROUTING_DIR/model-routing.local.json" \
+    node "$REPO_DIR/scripts/preflight.mjs" \
+      --routing "$ROUTING_DIR/model-routing.local.json" \
+      --runtime-root "$RUNTIME_ROOT" \
+    || die "preflight failed"
+
+  step "Live Paseo provider inventory"
+  command -v paseo >/dev/null 2>&1 || die "paseo not found on PATH"
+  local listing
+  if ! listing="$(paseo provider ls 2>&1)"; then
+    die "cannot reach the Paseo daemon. Start it with 'paseo daemon start', then retry."
+  fi
+  local role missing=0
+  for role in "${ROLES[@]}"; do
+    if grep -q "kiro-$role" <<<"$listing"; then
+      log "  kiro-$role $(grep "kiro-$role" <<<"$listing" | awk '{print $3, $4}')"
+    else
+      warn "kiro-$role is not in the live provider inventory; did you run 'paseo daemon reload'?"
+      missing=$((missing + 1))
+    fi
+  done
+  [[ $missing -eq 0 ]] || die "$missing provider(s) missing from the live inventory"
+
+  step "Pre-existing providers still present"
+  for role in codex-supervisor codex-lead codex-peer claude codex kiro; do
+    if grep -q "^$role " <<<"$listing"; then
+      log "  $role present"
+    else
+      warn "$role is missing from the live inventory"
+      missing=$((missing + 1))
+    fi
+  done
+  [[ $missing -eq 0 ]] || die "$missing pre-existing provider(s) missing"
+
+  log ""
+  log "verify OK"
+}
+
+case "$MODE" in
+  plan)   print_plan ;;
+  apply)  do_apply ;;
+  verify) do_verify ;;
+esac

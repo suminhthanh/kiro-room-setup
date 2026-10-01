@@ -1,0 +1,26 @@
+# Generated role runtimes never belong in Git.
+/runtime/
+.kiro-runtime/
+
+# Install transaction backups.
+.kiro-room-backups/
+
+# Operator-local routing table (copied from config/model-routing.example.json).
+model-routing.local.json
+
+# Sessions, logs, credentials.
+*.log
+sessions/
+auth.json
+*.key
+*.pem
+push-tokens.json
+daemon-keypair.json
+
+# Test scratch.
+/tmp/
+.tmp-*
+
+# OS / editor noise.
+.DS_Store
+node_modules/
